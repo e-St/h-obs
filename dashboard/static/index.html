@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SwitchBot Monitor</title>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d1117;
+      color: #e6edf3;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
+      min-height: 100vh;
+      padding: 28px 32px;
+    }
+
+    header {
+      display: flex;
+      align-items: baseline;
+      gap: 16px;
+      margin-bottom: 32px;
+      flex-wrap: wrap;
+    }
+    header h1 {
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: -0.3px;
+      color: #f0f6fc;
+    }
+    .subtitle {
+      font-size: 13px;
+      color: #6e7681;
+    }
+    #refresh-info {
+      margin-left: auto;
+      font-size: 12px;
+      color: #6e7681;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #3fb950;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    .charts { display: grid; grid-template-columns: 1fr; gap: 20px; }
+
+    .card {
+      background: rgba(22, 27, 34, 0.9);
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      padding: 20px 20px 16px;
+    }
+    .card-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .card-header h2 {
+      font-size: 14px;
+      font-weight: 600;
+      color: #c9d1d9;
+    }
+    .card-header .badge {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-weight: 500;
+    }
+    .badge-temp { background: rgba(248, 81, 73, 0.15); color: #f85149; }
+    .badge-humi { background: rgba(88, 166, 255, 0.15); color: #58a6ff; }
+
+    .chart-wrap { position: relative; }
+
+    /* SVG elements */
+    .grid line { stroke: #21262d; stroke-width: 1; }
+    .grid path { display: none; }
+    .axis text { fill: #6e7681; font-size: 11px; }
+    .axis path { stroke: #30363d; }
+    .axis line { stroke: #30363d; }
+    .axis-label { fill: #6e7681; font-size: 11px; }
+    .line { fill: none; stroke-width: 2px; stroke-linecap: round; stroke-linejoin: round; }
+    .area { opacity: 0.07; }
+    .crosshair { pointer-events: none; }
+
+    /* Legend */
+    .legend-text { font-size: 11px; }
+
+    /* Tooltip */
+    #tooltip {
+      position: fixed;
+      background: rgba(13, 17, 23, 0.96);
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 10px 14px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.1s;
+      z-index: 100;
+      min-width: 160px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    }
+    .tt-time { font-size: 11px; color: #6e7681; margin-bottom: 8px; }
+    .tt-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin: 3px 0;
+      font-size: 12px;
+    }
+    .tt-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .tt-name { color: #c9d1d9; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
+    .tt-val { font-weight: 600; margin-left: auto; white-space: nowrap; }
+
+    /* Loading / empty */
+    .state-msg {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 200px;
+      color: #6e7681;
+      font-size: 13px;
+      gap: 10px;
+    }
+    .spinner {
+      width: 18px; height: 18px;
+      border: 2px solid #30363d;
+      border-top-color: #58a6ff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>SwitchBot Monitor</h1>
+  <span class="subtitle">Last 24 hours · All devices</span>
+  <div id="refresh-info">
+    <span class="dot"></span>
+    <span id="refresh-label">Loading…</span>
+  </div>
+</header>
+
+<div class="charts">
+  <div class="card">
+    <div class="card-header">
+      <h2>Temperature</h2>
+      <span class="badge badge-temp">°C</span>
+    </div>
+    <div class="chart-wrap" id="temp-wrap"></div>
+  </div>
+  <div class="card">
+    <div class="card-header">
+      <h2>Humidity</h2>
+      <span class="badge badge-humi">%</span>
+    </div>
+    <div class="chart-wrap" id="humi-wrap"></div>
+  </div>
+</div>
+
+<div id="tooltip"></div>
+
+<script>
+const REFRESH_MS = 5 * 60 * 1000;
+const CHART_H = 280;
+const MARGIN = { top: 12, right: 160, bottom: 44, left: 52 };
+
+const COLOR = d3.scaleOrdinal([
+  '#58a6ff','#3fb950','#f0883e','#d2a8ff','#ffa657',
+  '#79c0ff','#56d364','#f85149','#bc8cff','#ffb757',
+]);
+
+const tooltip = d3.select('#tooltip');
+const timeFormat = d3.timeFormat('%H:%M');
+const fullFormat = d3.timeFormat('%b %d, %H:%M');
+
+let currentData = [];
+let devices = [];
+
+// ── Fetch ──────────────────────────────────────────────────────────────────
+async function fetchData() {
+  const resp = await fetch('/api/readings');
+  if (resp.status === 401) { window.location.href = '/login'; return []; }
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const { readings } = await resp.json();
+  return readings.map(d => ({ ...d, ts: new Date(d.timestamp) }));
+}
+
+// ── Chart ──────────────────────────────────────────────────────────────────
+function drawChart(wrapId, metric, unit) {
+  const wrap = document.getElementById(wrapId);
+  wrap.innerHTML = '';
+
+  const filtered = currentData.filter(d => d[metric] != null);
+
+  if (filtered.length === 0) {
+    wrap.innerHTML = `<div class="state-msg">No ${metric} data yet — waiting for first readings</div>`;
+    return;
+  }
+
+  const W = wrap.clientWidth || 800;
+  const width  = W - MARGIN.left - MARGIN.right;
+  const height = CHART_H - MARGIN.top - MARGIN.bottom;
+
+  const svg = d3.select(wrap)
+    .append('svg')
+    .attr('width', W)
+    .attr('height', CHART_H);
+
+  const g = svg.append('g')
+    .attr('transform', `translate(${MARGIN.left},${MARGIN.top})`);
+
+  // Scales
+  const xExt = d3.extent(filtered, d => d.ts);
+  const yExt = d3.extent(filtered, d => d[metric]);
+  const yPad = (yExt[1] - yExt[0]) * 0.12 || 1;
+
+  const xScale = d3.scaleTime().domain(xExt).range([0, width]);
+  const yScale = d3.scaleLinear()
+    .domain([yExt[0] - yPad, yExt[1] + yPad])
+    .range([height, 0])
+    .nice();
+
+  // Grid
+  g.append('g').attr('class', 'grid')
+    .call(d3.axisLeft(yScale).tickSize(-width).tickFormat(''));
+
+  // X axis
+  g.append('g').attr('class', 'axis')
+    .attr('transform', `translate(0,${height})`)
+    .call(d3.axisBottom(xScale).ticks(6).tickFormat(timeFormat));
+
+  // Y axis
+  g.append('g').attr('class', 'axis')
+    .call(d3.axisLeft(yScale).ticks(5));
+
+  // Y label
+  g.append('text').attr('class', 'axis-label')
+    .attr('transform', 'rotate(-90)')
+    .attr('x', -height / 2).attr('y', -38)
+    .attr('text-anchor', 'middle')
+    .text(unit);
+
+  // Lines + areas per device
+  const byDevice = d3.group(filtered, d => d.device_name);
+
+  const line = d3.line()
+    .x(d => xScale(d.ts))
+    .y(d => yScale(d[metric]))
+    .curve(d3.curveMonotoneX);
+
+  const area = d3.area()
+    .x(d => xScale(d.ts))
+    .y0(height)
+    .y1(d => yScale(d[metric]))
+    .curve(d3.curveMonotoneX);
+
+  byDevice.forEach((rows, name) => {
+    const sorted = rows.sort((a, b) => a.ts - b.ts);
+    const col = COLOR(name);
+
+    // Area fill
+    g.append('path').datum(sorted)
+      .attr('class', 'area')
+      .attr('fill', col)
+      .attr('d', area);
+
+    // Line with draw animation
+    const path = g.append('path').datum(sorted)
+      .attr('class', 'line')
+      .attr('stroke', col)
+      .attr('d', line);
+
+    const len = path.node().getTotalLength();
+    path.attr('stroke-dasharray', `${len} ${len}`)
+        .attr('stroke-dashoffset', len)
+      .transition().duration(900).ease(d3.easeQuadOut)
+        .attr('stroke-dashoffset', 0);
+  });
+
+  // Legend
+  const legend = svg.append('g')
+    .attr('transform', `translate(${MARGIN.left + width + 12}, ${MARGIN.top})`);
+
+  let li = 0;
+  byDevice.forEach((_, name) => {
+    const row = legend.append('g').attr('transform', `translate(0, ${li * 20})`);
+    row.append('line')
+      .attr('x1', 0).attr('x2', 14).attr('y1', 7).attr('y2', 7)
+      .attr('stroke', COLOR(name)).attr('stroke-width', 2)
+      .attr('stroke-linecap', 'round');
+    row.append('text').attr('class', 'legend-text')
+      .attr('x', 20).attr('y', 11)
+      .attr('fill', '#8b949e')
+      .text(name.length > 16 ? name.slice(0, 14) + '…' : name);
+    li++;
+  });
+
+  // Crosshair + tooltip interaction
+  const bisect = d3.bisector(d => d.ts).left;
+
+  const crosshair = g.append('line').attr('class', 'crosshair')
+    .attr('y1', 0).attr('y2', height)
+    .attr('stroke', 'rgba(255,255,255,0.2)')
+    .attr('stroke-dasharray', '4 3')
+    .style('opacity', 0);
+
+  svg.on('mousemove', function(event) {
+    const [mx] = d3.pointer(event, g.node());
+    if (mx < 0 || mx > width) { crosshair.style('opacity', 0); tooltip.style('opacity', 0); return; }
+
+    const ts = xScale.invert(mx);
+    crosshair.attr('x1', mx).attr('x2', mx).style('opacity', 1);
+
+    let html = `<div class="tt-time">${fullFormat(ts)}</div>`;
+    byDevice.forEach((rows, name) => {
+      const sorted = rows.sort((a, b) => a.ts - b.ts);
+      const i = Math.min(bisect(sorted, ts), sorted.length - 1);
+      const val = sorted[i]?.[metric];
+      html += `<div class="tt-row">
+        <span class="tt-dot" style="background:${COLOR(name)}"></span>
+        <span class="tt-name">${name}</span>
+        <span class="tt-val" style="color:${COLOR(name)}">${val != null ? val.toFixed(1) + unit : '—'}</span>
+      </div>`;
+    });
+
+    const [px, py] = d3.pointer(event, document.body);
+    tooltip.html(html)
+      .style('opacity', 1)
+      .style('left', `${Math.min(px + 14, window.innerWidth - 200)}px`)
+      .style('top', `${py - 20}px`);
+  })
+  .on('mouseleave', () => {
+    crosshair.style('opacity', 0);
+    tooltip.style('opacity', 0);
+  });
+}
+
+// ── Render ─────────────────────────────────────────────────────────────────
+function render() {
+  drawChart('temp-wrap', 'temperature', '°C');
+  drawChart('humi-wrap', 'humidity', '%');
+}
+
+function showLoading() {
+  ['temp-wrap', 'humi-wrap'].forEach(id => {
+    document.getElementById(id).innerHTML =
+      `<div class="state-msg"><div class="spinner"></div> Loading…</div>`;
+  });
+}
+
+// ── Refresh loop ───────────────────────────────────────────────────────────
+let refreshTimer;
+let countdown;
+
+function startCountdown() {
+  clearInterval(countdown);
+  let secs = REFRESH_MS / 1000;
+  const label = document.getElementById('refresh-label');
+  const tick = () => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    label.textContent = `Refreshes in ${m}:${String(s).padStart(2,'0')}`;
+    secs--;
+  };
+  tick();
+  countdown = setInterval(tick, 1000);
+}
+
+async function refresh() {
+  try {
+    currentData = await fetchData();
+    devices = [...new Set(currentData.map(d => d.device_name))].sort();
+    COLOR.domain(devices);
+    render();
+    document.getElementById('refresh-label').textContent =
+      `Updated ${d3.timeFormat('%H:%M')(new Date())}`;
+    startCountdown();
+  } catch (err) {
+    console.error(err);
+    document.getElementById('refresh-label').textContent = 'Error loading data';
+  }
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+showLoading();
+refresh();
+refreshTimer = setInterval(refresh, REFRESH_MS);
+window.addEventListener('resize', () => { if (currentData.length) render(); });
+</script>
+</body>
+</html>

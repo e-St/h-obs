@@ -8,7 +8,7 @@
 - **Secrets**: Secret Manager (token + secret)
 - **Raw Storage (Long-term)**: Cloud Storage (multi/dual-region bucket) with lifecycle rules (Standard → Nearline → Coldline). JSONL files partitioned by `dt=YYYY-MM-DD/hh=HH/` for Hive-style access. Durability 11 9's. Cost: pennies/year even after 10 years.
 - **Query Layer (Aggregates)**: BigQuery **external table** over the GCS JSONL (no data duplication, zero BQ storage cost for raw). Partition pruning on date/hour. Write simple SQL for daily/hourly averages, min/max, trends per device.
-- **Visualization & Dashboards**: Looker Studio (free, managed) — direct BigQuery connector, beautiful time-series charts, gauges, filters by device/date. Schedule email/PDF reports.
+- **Visualization & Dashboards**: Custom D3.js dashboard served from Cloud Run — password-protected, auto-refreshes every 5 min, time-series charts per device. Reads directly from BigQuery.
 - **Alerts**: 
   - Built-in: Threshold checks in the function (configurable via env vars) → structured JSON logs → Cloud Monitoring **log-based alerting policy** → email/Slack/PagerDuty notification.
   - For aggregate alerts (e.g. daily avg humidity low): Add a second scheduled Cloud Function or use BigQuery scheduled queries + similar logging.
@@ -231,7 +231,7 @@ CREATE OR REPLACE VIEW `h-obs-500318.switchbot_analytics.latest_readings` AS
 SELECT * EXCEPT(rn)
 FROM (
   SELECT *, ROW_NUMBER() OVER (PARTITION BY device_id ORDER BY ingestion_timestamp DESC) as rn
-  FROM `your_project.switchbot_analytics.switchbot_raw_readings`
+  FROM `h-obs-500318.switchbot_analytics.switchbot_raw_readings`
 )
 WHERE rn = 1;
 
@@ -249,25 +249,84 @@ SELECT
   MIN(humidity) as min_humidity,
   MAX(humidity) as max_humidity,
   COUNT(*) as reading_count
-FROM `your_project.switchbot_analytics.switchbot_raw_readings`
+FROM `h-obs-500318.switchbot_analytics.switchbot_raw_readings`
 WHERE temperature IS NOT NULL OR humidity IS NOT NULL
 GROUP BY dt, device_id, device_name, device_type;
+
+-- Last 24 hours (used by the dashboard)
+CREATE OR REPLACE VIEW `h-obs-500318.switchbot_analytics.last_24h_readings` AS
+SELECT
+  ingestion_timestamp,
+  device_id,
+  device_name,
+  device_type,
+  temperature,
+  humidity,
+  battery,
+  dt,
+  hh
+FROM `h-obs-500318.switchbot_analytics.switchbot_raw_readings`
+WHERE ingestion_timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)
+  AND (temperature IS NOT NULL OR humidity IS NOT NULL);
 ```
 
-## Step 6: Visualization in Looker Studio (Free & Easy)
-1. Go to [lookerstudio.google.com](https://lookerstudio.google.com)
-2. Create → Data Source → BigQuery → select your project/dataset → the external table or the views above
-3. Create new Report
-4. Add charts:
-   - Time series line chart: Date vs avg_temp / humidity, breakdown by device_name
-   - Scorecard / Gauge for current values (use `latest_readings` view)
-   - Table with filters
-   - Heatmap or bar for daily aggregates
-5. Add date range control, device filter (dropdown)
-6. Style beautifully (colors for temp/humidity)
-7. Share with team or schedule email delivery of the dashboard (PDF or link)
+Create views via CLI:
 
-**Pro tip**: Use the `daily_aggregates` or `latest_readings` views for faster dashboards.
+```bash
+bq query --location=EU --nouse_legacy_sql --project_id=h-obs-500318 \
+  < /tmp/create_views.sql
+```
+
+## Step 6: Deploy Custom D3 Dashboard
+A password-protected FastAPI + D3.js dashboard served from Cloud Run.
+Source code: `dashboard/` — reads from BigQuery only, never touches the SwitchBot API.
+
+```bash
+export PROJECT_ID="h-obs-500318"
+
+# Grant BigQuery read permissions to the SA
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:switchbot-ingest-sa@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/bigquery.jobUser"
+
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:switchbot-ingest-sa@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/bigquery.dataViewer"
+
+# Store the dashboard password in Secret Manager
+echo -n "YOUR_STRONG_PASSWORD" | \
+  gcloud secrets create dashboard-password \
+    --data-file=- \
+    --project=$PROJECT_ID
+
+# Grant the SA access to the secret
+gcloud secrets add-iam-policy-binding dashboard-password \
+  --member="serviceAccount:switchbot-ingest-sa@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+
+# Deploy to Cloud Run (source deploy — no Docker needed)
+cd dashboard/
+
+gcloud run deploy switchbot-dashboard \
+  --source . \
+  --region europe-west3 \
+  --service-account switchbot-ingest-sa@$PROJECT_ID.iam.gserviceaccount.com \
+  --set-env-vars "GOOGLE_CLOUD_PROJECT=$PROJECT_ID" \
+  --allow-unauthenticated \
+  --memory 256Mi \
+  --min-instances 0 \
+  --max-instances 2
+```
+
+After deploy, open the printed Cloud Run URL. You will be redirected to a login page — enter the password set above.
+The dashboard auto-refreshes every 5 minutes and shows temperature + humidity line charts for all devices over the last 24 hours.
+
+**Update password:**
+```bash
+echo -n "NEW_PASSWORD" | \
+  gcloud secrets versions add dashboard-password --data-file=-
+# Redeploy or restart the Cloud Run service to pick up the new version
+```
 
 ## Step 7: Alerts (Thresholds + Monitoring)
 The function already logs structured warnings when thresholds are breached (see `check_and_log_alerts`).
@@ -302,15 +361,19 @@ For **aggregate-based alerts** (e.g. "daily min humidity < 20% for any device"):
 - **Scaling**: Works for hundreds of devices (still cheap). For 1000s consider Pub/Sub + Dataflow, but overkill here.
 
 ## Files in this package
-- `switchbot_ingest.py` — Production-ready Cloud Function code (with retries, structured logging, alerts, full raw preservation)
-- `requirements.txt` — Minimal deps
+- `switchbot-ingestion/main.py` — Cloud Function (polls SwitchBot API, writes JSONL to GCS)
+- `switchbot-ingestion/requirements.txt` — Cloud Function dependencies
+- `dashboard/main.py` — FastAPI backend (queries BigQuery, serves dashboard, handles auth)
+- `dashboard/static/index.html` — D3.js dashboard UI
+- `dashboard/requirements.txt` — Dashboard dependencies
 
 ## Next Steps / Roadmap for your full data layer
-1. This raw ingestion (done)
-2. Add daily/ hourly materialized aggregate tables via BigQuery scheduled queries (or dbt / Dataform)
-3. Advanced viz & self-serve analytics in Looker Studio or connected BI tool
-4. (Optional) Stream recent data to a fast dashboard DB or Pub/Sub for real-time
-5. Long-term: Consider switching hot path to Parquet in GCS + native BQ table for even better query perf (easy migration)
+1. Raw ingestion (done ✓)
+2. BigQuery external table + views (done ✓)
+3. Custom D3 dashboard on Cloud Run (done ✓)
+4. Add more BigQuery scheduled queries for materialized daily/hourly aggregates
+5. (Optional) Replace Scheduler polling with SwitchBot webhooks for real-time push → lower API usage
+6. Long-term: Migrate hot path to Parquet + native BQ table for faster queries
 
 This gives you a **production-grade, future-proof, low-maintenance data ingestion layer** that will still be accessible and queryable in 2036+.
 
