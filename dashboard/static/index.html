@@ -11,6 +11,350 @@
     body {
       background: #0d1117;
       color: #e6edf3;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      min-height: 100vh;
+      padding: 24px 28px;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 28px;
+      flex-wrap: wrap;
+    }
+    header h1 { font-size: 20px; font-weight: 600; color: #f0f6fc; letter-spacing: -0.3px; }
+    .live { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #6e7681; }
+    .live-dot { width: 7px; height: 7px; border-radius: 50%; background: #3fb950; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+    #refresh-label { margin-left: auto; font-size: 12px; color: #6e7681; }
+
+    .charts { display: grid; gap: 20px; }
+
+    .card {
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 12px;
+      padding: 20px 20px 14px;
+    }
+    .card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .card-header h2 {
+      font-size: 11px; font-weight: 600; color: #6e7681;
+      text-transform: uppercase; letter-spacing: 0.8px;
+    }
+    .badge { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 600; }
+    .badge-temp { background: rgba(248, 81, 73, 0.1); color: #f85149; }
+    .badge-humi { background: rgba(88, 166, 255, 0.1); color: #58a6ff; }
+
+    /* Legend — horizontal, wrapping, clickable */
+    .legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-bottom: 12px; }
+    .legend-item {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 11px; color: #8b949e;
+      cursor: pointer; user-select: none;
+      padding: 3px 7px 3px 4px;
+      border-radius: 5px;
+      border: 1px solid transparent;
+      transition: background 0.12s, color 0.12s, opacity 0.12s;
+    }
+    .legend-item:hover { background: rgba(255,255,255,0.05); color: #c9d1d9; }
+    .legend-item.active { color: #c9d1d9; border-color: rgba(255,255,255,0.08); }
+    .legend-item.hidden { opacity: 0.28; }
+    .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+    /* SVG */
+    .chart-wrap { position: relative; }
+    .axis text { fill: #484f58; font-size: 11px; }
+    .axis path { display: none; }
+    .axis line { stroke: #21262d; }
+    .grid line { stroke: #1c2128; stroke-width: 1; }
+    .grid path { display: none; }
+    .sensor-line { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .crosshair-line { pointer-events: none; }
+
+    /* Tooltip */
+    #tooltip {
+      position: fixed; z-index: 100;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 10px 14px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.1s;
+      min-width: 155px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+    }
+    .tt-time { font-size: 11px; color: #484f58; margin-bottom: 8px; font-variant-numeric: tabular-nums; }
+    .tt-row { display: flex; align-items: center; gap: 7px; margin: 3px 0; font-size: 12px; }
+    .tt-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .tt-name { color: #8b949e; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
+    .tt-val { font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+    /* States */
+    .state-msg { display: flex; align-items: center; justify-content: center; height: 220px; color: #484f58; font-size: 13px; gap: 10px; }
+    .spinner { width: 16px; height: 16px; border: 2px solid #21262d; border-top-color: #58a6ff; border-radius: 50%; animation: spin 0.7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>SwitchBot Monitor</h1>
+  <div class="live"><span class="live-dot"></span>Live · 24 h</div>
+  <span id="refresh-label">Loading…</span>
+</header>
+
+<div class="charts">
+  <div class="card">
+    <div class="card-header"><h2>Temperature</h2><span class="badge badge-temp">°C</span></div>
+    <div class="legend" id="temp-legend"></div>
+    <div class="chart-wrap" id="temp-wrap"></div>
+  </div>
+  <div class="card">
+    <div class="card-header"><h2>Humidity</h2><span class="badge badge-humi">%</span></div>
+    <div class="legend" id="humi-legend"></div>
+    <div class="chart-wrap" id="humi-wrap"></div>
+  </div>
+</div>
+
+<div id="tooltip"></div>
+
+<script>
+const REFRESH_MS = 5 * 60 * 1000;
+const CHART_H    = 300;
+const M          = { top: 12, right: 20, bottom: 42, left: 46 };
+
+// 20 perceptually distinct colors optimised for dark backgrounds
+const PALETTE = [
+  '#4fc3f7','#81c784','#ffb74d','#f06292','#ce93d8',
+  '#80deea','#aed581','#ffd54f','#ff8a65','#90caf9',
+  '#26c6da','#66bb6a','#ffa726','#ec407a','#7e57c2',
+  '#29b6f6','#26a69a','#d4e157','#ff7043','#ab47bc',
+];
+
+// Stable color per device name (hash → palette index)
+function deviceColor(name) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = Math.imul(h * 31 + name.charCodeAt(i), 1) >>> 0;
+  return PALETTE[h % PALETTE.length];
+}
+
+const tooltip  = d3.select('#tooltip');
+const timeFmt  = d3.timeFormat('%H:%M');
+const fullFmt  = d3.timeFormat('%b %d  %H:%M');
+
+let allData  = [];
+let devices  = [];
+const hidden = new Set();   // persists across auto-refreshes
+
+// ── Data ──────────────────────────────────────────────────────────────────
+async function fetchData() {
+  const r = await fetch('/api/readings');
+  if (r.status === 401) { window.location.href = '/login'; return []; }
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const { readings } = await r.json();
+  return readings.map(d => ({ ...d, ts: new Date(d.timestamp) }));
+}
+
+// ── Legend ────────────────────────────────────────────────────────────────
+function buildLegend(legendId, wrapId, metric, unit) {
+  const el = document.getElementById(legendId);
+  el.innerHTML = '';
+  devices.forEach(name => {
+    const item = document.createElement('span');
+    item.className = 'legend-item ' + (hidden.has(name) ? 'hidden' : 'active');
+    item.innerHTML =
+      `<span class="legend-dot" style="background:${deviceColor(name)}"></span>${name}`;
+    item.addEventListener('click', () => {
+      hidden.has(name) ? hidden.delete(name) : hidden.add(name);
+      buildLegend(legendId, wrapId, metric, unit);
+      drawChart(wrapId, metric, unit);
+    });
+    el.appendChild(item);
+  });
+}
+
+// ── Chart ─────────────────────────────────────────────────────────────────
+function drawChart(wrapId, metric, unit) {
+  const wrap = document.getElementById(wrapId);
+  wrap.innerHTML = '';
+
+  const metricData = allData.filter(d => d[metric] != null);
+  if (!metricData.length) {
+    wrap.innerHTML = `<div class="state-msg">No ${metric} data yet — waiting for first readings</div>`;
+    return;
+  }
+
+  const W      = wrap.clientWidth || 800;
+  const width  = W - M.left - M.right;
+  const height = CHART_H - M.top - M.bottom;
+
+  const svg = d3.select(wrap).append('svg').attr('width', W).attr('height', CHART_H);
+  const g   = svg.append('g').attr('transform', `translate(${M.left},${M.top})`);
+
+  // Clip so lines stay inside axes
+  svg.append('defs').append('clipPath').attr('id', `clip-${wrapId}`)
+    .append('rect').attr('width', width).attr('height', height + 2).attr('y', -1);
+
+  // Scales from ALL data so axis stays stable when toggling sensors
+  const xScale = d3.scaleTime()
+    .domain(d3.extent(metricData, d => d.ts))
+    .range([0, width]);
+
+  const visibleData = metricData.filter(d => !hidden.has(d.device_name));
+  const yVals  = (visibleData.length ? visibleData : metricData).map(d => d[metric]);
+  const [yMin, yMax] = d3.extent(yVals);
+  const yPad   = (yMax - yMin) * 0.14 || 1;
+  const yScale = d3.scaleLinear()
+    .domain([yMin - yPad, yMax + yPad])
+    .range([height, 0]).nice();
+
+  // Grid (horizontal only)
+  g.append('g').attr('class', 'grid')
+    .call(d3.axisLeft(yScale).tickSize(-width).tickFormat('').ticks(5));
+
+  // X axis
+  g.append('g').attr('class', 'axis')
+    .attr('transform', `translate(0,${height})`)
+    .call(d3.axisBottom(xScale).ticks(6).tickFormat(timeFmt).tickSize(3));
+
+  // Y axis
+  g.append('g').attr('class', 'axis')
+    .call(d3.axisLeft(yScale).ticks(5).tickSize(3));
+
+  // Lines
+  const lineGen = d3.line()
+    .x(d => xScale(d.ts)).y(d => yScale(d[metric]))
+    .curve(d3.curveMonotoneX);
+
+  const byDevice = d3.group(metricData, d => d.device_name);
+  const lineGroup = g.append('g').attr('clip-path', `url(#clip-${wrapId})`);
+
+  byDevice.forEach((rows, name) => {
+    const sorted = rows.sort((a, b) => a.ts - b.ts);
+    const isHidden = hidden.has(name);
+    const col = deviceColor(name);
+
+    const path = lineGroup.append('path')
+      .datum(sorted)
+      .attr('class', 'sensor-line')
+      .attr('stroke', col)
+      .attr('stroke-width', 2)
+      .attr('opacity', isHidden ? 0 : 0.9)
+      .attr('d', lineGen);
+
+    if (!isHidden) {
+      const len = path.node().getTotalLength();
+      path.attr('stroke-dasharray', `${len} ${len}`)
+          .attr('stroke-dashoffset', len)
+        .transition().duration(900).ease(d3.easeQuadOut)
+          .attr('stroke-dashoffset', 0);
+    }
+  });
+
+  // ── Hover ────────────────────────────────────────────────────────────────
+  const bisect    = d3.bisector(d => d.ts).left;
+  const crosshair = g.append('line').attr('class', 'crosshair-line')
+    .attr('y1', 0).attr('y2', height)
+    .attr('stroke', 'rgba(255,255,255,0.12)')
+    .attr('stroke-dasharray', '3 3')
+    .style('opacity', 0);
+
+  g.append('rect')                         // invisible hit area
+    .attr('width', width).attr('height', height).attr('fill', 'transparent')
+    .on('mousemove', function(event) {
+      const [mx] = d3.pointer(event);
+      if (mx < 0 || mx > width) return;
+      const ts = xScale.invert(mx);
+      crosshair.attr('x1', mx).attr('x2', mx).style('opacity', 1);
+
+      let html = `<div class="tt-time">${fullFmt(ts)}</div>`;
+      let count = 0;
+      byDevice.forEach((rows, name) => {
+        if (hidden.has(name)) return;
+        const sorted = rows.sort((a, b) => a.ts - b.ts);
+        const i = Math.min(bisect(sorted, ts), sorted.length - 1);
+        const val = sorted[i]?.[metric];
+        if (val == null) return;
+        count++;
+        html += `<div class="tt-row">
+          <span class="tt-dot" style="background:${deviceColor(name)}"></span>
+          <span class="tt-name">${name}</span>
+          <span class="tt-val" style="color:${deviceColor(name)}">${val.toFixed(1)}${unit}</span>
+        </div>`;
+      });
+      if (!count) return;
+
+      const [px, py] = d3.pointer(event, document.body);
+      tooltip.html(html).style('opacity', 1)
+        .style('left', `${Math.min(px + 14, window.innerWidth - 185)}px`)
+        .style('top',  `${Math.max(8, py - 20)}px`);
+    })
+    .on('mouseleave', () => {
+      crosshair.style('opacity', 0);
+      tooltip.style('opacity', 0);
+    });
+}
+
+// ── Render all ────────────────────────────────────────────────────────────
+function render() {
+  buildLegend('temp-legend', 'temp-wrap', 'temperature', '°C');
+  buildLegend('humi-legend', 'humi-wrap', 'humidity',    '%');
+  drawChart('temp-wrap', 'temperature', '°C');
+  drawChart('humi-wrap', 'humidity',    '%');
+}
+
+function showLoading() {
+  ['temp-wrap', 'humi-wrap'].forEach(id => {
+    document.getElementById(id).innerHTML =
+      `<div class="state-msg"><div class="spinner"></div>Loading…</div>`;
+  });
+}
+
+// ── Countdown ─────────────────────────────────────────────────────────────
+let countdown;
+function startCountdown() {
+  clearInterval(countdown);
+  let secs = REFRESH_MS / 1000;
+  const label = document.getElementById('refresh-label');
+  countdown = setInterval(() => {
+    const m = Math.floor(secs / 60), s = secs % 60;
+    label.textContent = `Refreshes in ${m}:${String(s).padStart(2, '0')}`;
+    if (--secs < 0) clearInterval(countdown);
+  }, 1000);
+}
+
+// ── Refresh ───────────────────────────────────────────────────────────────
+async function refresh() {
+  try {
+    const fresh = await fetchData();
+    if (!fresh.length) return;
+    allData  = fresh;
+    devices  = [...new Set(allData.map(d => d.device_name))].sort();
+    render();
+    document.getElementById('refresh-label').textContent =
+      `Updated ${d3.timeFormat('%H:%M:%S')(new Date())}`;
+    startCountdown();
+  } catch (err) {
+    console.error(err);
+    document.getElementById('refresh-label').textContent = 'Error — will retry';
+  }
+}
+
+showLoading();
+refresh();
+setInterval(refresh, REFRESH_MS);
+window.addEventListener('resize', () => { if (allData.length) render(); });
+</script>
+</body>
+</html>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0d1117;
+      color: #e6edf3;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
       min-height: 100vh;
       padding: 28px 32px;

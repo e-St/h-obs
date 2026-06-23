@@ -63,6 +63,11 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
   --member="serviceAccount:switchbot-ingest-sa@$PROJECT_ID.iam.gserviceaccount.com" \
   --role="roles/storage.objectCreator"
 
+# Allow BigQuery (and the dashboard) to read GCS objects for external table queries
+gcloud storage buckets add-iam-policy-binding gs://h-obs-sws101-raw-eu \
+  --member="serviceAccount:switchbot-ingest-sa@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/storage.objectViewer"
+
 # Allow Cloud Scheduler to invoke the Cloud Function (gen2 = Cloud Run backed)
 # Run this after deploying the function in Step 3
 gcloud functions add-invoker-policy-binding ingest-switchbot-data \
@@ -182,7 +187,7 @@ CREATE OR REPLACE EXTERNAL TABLE `h-obs-500318.switchbot_analytics.switchbot_raw
   temperature         FLOAT64,
   humidity            INT64,
   battery             INT64,
-  raw_body            STRING,
+  raw_body            JSON,
   api_status_code     INT64,
   api_message         STRING,
   error               STRING
