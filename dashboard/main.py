@@ -1,6 +1,8 @@
 import hashlib
 import hmac
 import os
+import time
+from collections import defaultdict
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
@@ -33,6 +35,25 @@ def _load_password() -> str:
         return pw
 
 _PASSWORD: str = _load_password()
+
+# ── Rate limiting (brute-force protection on /login) ───────────────────────
+_LOGIN_ATTEMPTS: dict[str, list[float]] = defaultdict(list)
+_RL_WINDOW = 300   # 5-minute sliding window
+_RL_MAX    = 5     # max attempts per window per IP
+
+def _client_ip(request: Request) -> str:
+    # Cloud Run sets X-Forwarded-For; fall back to direct connection
+    forwarded = request.headers.get("x-forwarded-for", "")
+    return forwarded.split(",")[0].strip() or request.client.host or "unknown"
+
+def _is_rate_limited(ip: str) -> bool:
+    now = time.monotonic()
+    window = [t for t in _LOGIN_ATTEMPTS[ip] if now - t < _RL_WINDOW]
+    _LOGIN_ATTEMPTS[ip] = window
+    if len(window) >= _RL_MAX:
+        return True
+    _LOGIN_ATTEMPTS[ip].append(now)
+    return False
 
 def _session_token() -> str:
     """Deterministic token derived from password — stable across instances/restarts."""
@@ -97,7 +118,13 @@ async def login_get():
 
 
 @app.post("/login")
-async def login_post(password: str = Form(...)):
+async def login_post(request: Request, password: str = Form(...)):
+    ip = _client_ip(request)
+    if _is_rate_limited(ip):
+        return HTMLResponse(
+            _LOGIN_PAGE.format(error='<p class="err">Too many attempts. Try again in 5 minutes.</p>'),
+            status_code=429,
+        )
     provided = hashlib.sha256(password.encode()).hexdigest()
     expected = hashlib.sha256(_PASSWORD.encode()).hexdigest()
     if hmac.compare_digest(provided, expected):
