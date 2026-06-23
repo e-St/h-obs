@@ -63,6 +63,12 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
   --member="serviceAccount:switchbot-ingest-sa@$PROJECT_ID.iam.gserviceaccount.com" \
   --role="roles/storage.objectCreator"
 
+# Allow Cloud Scheduler to invoke the Cloud Function (gen2 = Cloud Run backed)
+# Run this after deploying the function in Step 3
+gcloud functions add-invoker-policy-binding ingest-switchbot-data \
+  --region=europe-west3 \
+  --member="serviceAccount:switchbot-ingest-sa@$PROJECT_ID.iam.gserviceaccount.com"
+
 # (Optional) If you later add BQ native loads: roles/bigquery.dataEditor
 ```
 
