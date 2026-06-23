@@ -223,16 +223,15 @@ def save_readings_to_gcs_jsonl(
     lines = [json.dumps(r, ensure_ascii=False, default=str) for r in readings]
     content = "\n".join(lines) + "\n"
 
+    blob.metadata = {
+        "source": "switchbot-api-v1.1",
+        "run_id": run_id,
+        "ingestion_timestamp": ingestion_ts,
+        "num_readings": str(len(readings))
+    }
     blob.upload_from_string(
         content,
         content_type="application/x-ndjson",
-        # Add metadata for traceability
-        metadata={
-            "source": "switchbot-api-v1.1",
-            "run_id": run_id,
-            "ingestion_timestamp": ingestion_ts,
-            "num_readings": str(len(readings))
-        }
     )
 
     gcs_uri = f"gs://{bucket_name}/{blob_name}"
