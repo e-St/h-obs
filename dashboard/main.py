@@ -7,7 +7,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from google.cloud import bigquery
 
 PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT", "h-obs-500318")
@@ -113,7 +113,9 @@ _LOGIN_PAGE = """<!DOCTYPE html>
 
 
 @app.get("/login", response_class=HTMLResponse)
-async def login_get():
+async def login_get(request: Request):
+    if _is_auth(request):
+        return RedirectResponse("/", status_code=303)
     return _LOGIN_PAGE.format(error="")
 
 
@@ -186,9 +188,12 @@ async def health():
     return {"status": "ok"}
 
 
-# ── Static files (dashboard UI) ────────────────────────────────────────────
-static_dir = Path(__file__).parent / "static"
-app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="static")
+# ── Dashboard UI ──────────────────────────────────────────────────────────
+_INDEX = Path(__file__).parent / "static" / "index.html"
+
+@app.get("/")
+async def index():
+    return FileResponse(str(_INDEX))
 
 if __name__ == "__main__":
     import uvicorn
