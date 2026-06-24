@@ -9,56 +9,73 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      background: #0d1117;
-      color: #e6edf3;
+      background: #1c1408;
+      color: #e8d4a8;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      min-height: 100vh;
-      padding: 24px 28px;
+      height: 100vh;
+      overflow: hidden;
+      padding: 16px 20px 0;
+      display: flex;
+      flex-direction: column;
     }
 
     header {
       display: flex;
       align-items: center;
       gap: 12px;
-      margin-bottom: 28px;
+      margin-bottom: 12px;
       flex-wrap: wrap;
+      flex-shrink: 0;
     }
-    header h1 { font-size: 20px; font-weight: 600; color: #f0f6fc; letter-spacing: -0.3px; }
-    .live { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #6e7681; }
-    .live-dot { width: 7px; height: 7px; border-radius: 50%; background: #3fb950; animation: pulse 2s infinite; }
+    header h1 { font-size: 20px; font-weight: 600; color: #f0e4c0; letter-spacing: -0.3px; }
+    .live { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #907850; }
+    .live-dot { width: 7px; height: 7px; border-radius: 50%; background: #d87820; animation: pulse 2s infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
-    #refresh-label { margin-left: auto; font-size: 12px; color: #6e7681; }
+    #refresh-label { margin-left: auto; font-size: 12px; color: #907850; }
 
-    .charts { display: grid; gap: 20px; }
+    /* Tab navigation */
+    .tab-nav { display: flex; gap: 6px; margin-bottom: 10px; flex-shrink: 0; }
+    .tab-btn {
+      padding: 6px 20px; border-radius: 8px;
+      border: 1px solid #3c2c18; background: transparent;
+      color: #907850; cursor: pointer; font-size: 12px; font-weight: 500;
+      font-family: inherit; transition: background 0.12s, color 0.12s;
+    }
+    .tab-btn.active { background: #2a1c0a; color: #e8d4a8; border-color: #5a4028; }
+    .tab-btn:not(.active):hover { background: rgba(255,220,160,0.05); color: #d4bc88; }
+    .tab-panels { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .tab-panel { display: none; flex: 1; min-height: 0; flex-direction: column; }
+    .tab-panel.active { display: flex; }
 
     .card {
-      background: #161b22;
-      border: 1px solid #21262d;
+      background: #241c0e;
+      border: 1px solid #3c2c18;
       border-radius: 12px;
-      padding: 20px 20px 14px;
+      padding: 16px 20px 12px;
+      flex: 1; min-height: 0; display: flex; flex-direction: column;
     }
-    .card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-shrink: 0; }
     .card-header h2 {
-      font-size: 11px; font-weight: 600; color: #6e7681;
+      font-size: 11px; font-weight: 600; color: #907850;
       text-transform: uppercase; letter-spacing: 0.8px;
     }
     .badge { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 600; }
-    .badge-temp { background: rgba(248, 81, 73, 0.1); color: #f85149; }
-    .badge-humi { background: rgba(88, 166, 255, 0.1); color: #58a6ff; }
+    .badge-temp { background: rgba(216, 100, 50, 0.15); color: #d86432; }
+    .badge-humi { background: rgba(80, 180, 160, 0.15); color: #50b4a0; }
 
     /* Legend — horizontal, wrapping, clickable */
-    .legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-bottom: 12px; }
+    .legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-bottom: 10px; flex-shrink: 0; }
     .legend-item {
       display: inline-flex; align-items: center; gap: 5px;
-      font-size: 11px; color: #8b949e;
+      font-size: 11px; color: #a08860;
       cursor: pointer; user-select: none;
       padding: 3px 7px 3px 4px;
       border-radius: 5px;
       border: 1px solid transparent;
       transition: background 0.12s, color 0.12s, opacity 0.12s;
     }
-    .legend-item:hover { background: rgba(255,255,255,0.05); color: #c9d1d9; }
-    .legend-item.active { color: #c9d1d9; border-color: rgba(255,255,255,0.08); }
+    .legend-item:hover { background: rgba(255,220,160,0.07); color: #d4bc88; }
+    .legend-item.active { color: #d4bc88; border-color: rgba(255,220,160,0.18); }
     .legend-item.hidden { opacity: 0.28; }
     .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 
@@ -72,23 +89,23 @@
       flex-shrink: 0;
     }
     .legend-action {
-      color: #58a6ff;
+      color: #c8783a;
       cursor: pointer;
       padding: 1px 5px;
       border-radius: 3px;
       user-select: none;
     }
     .legend-action:hover {
-      background: rgba(88, 166, 255, 0.12);
-      color: #79b8ff;
+      background: rgba(200, 120, 58, 0.18);
+      color: #e8904e;
     }
 
     /* SVG */
-    .chart-wrap { position: relative; }
-    .axis text { fill: #484f58; font-size: 11px; }
+    .chart-wrap { position: relative; flex: 1; min-height: 0; }
+    .axis text { fill: #706048; font-size: 11px; }
     .axis path { display: none; }
-    .axis line { stroke: #21262d; }
-    .grid line { stroke: #1c2128; stroke-width: 1; }
+    .axis line { stroke: #3c2c18; }
+    .grid line { stroke: #28180a; stroke-width: 1; }
     .grid path { display: none; }
     .sensor-line { fill: none; stroke-linecap: round; stroke-linejoin: round; cursor: pointer; }
     .crosshair-line { pointer-events: none; }
@@ -96,50 +113,52 @@
     /* Tooltip */
     #tooltip {
       position: fixed; z-index: 100;
-      background: #0d1117;
-      border: 1px solid #30363d;
+      background: #1c1408;
+      border: 1px solid #3c2c18;
       border-radius: 8px;
       padding: 10px 14px;
       pointer-events: none;
       opacity: 0;
       transition: opacity 0.1s;
       min-width: 155px;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
     }
-    .tt-time { font-size: 11px; color: #484f58; margin-bottom: 8px; font-variant-numeric: tabular-nums; }
+    .tt-time { font-size: 11px; color: #706048; margin-bottom: 8px; font-variant-numeric: tabular-nums; }
     .tt-row { display: flex; align-items: center; gap: 7px; margin: 3px 0; font-size: 12px; }
     .tt-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-    .tt-name { color: #8b949e; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
+    .tt-name { color: #a08860; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
     .tt-val { font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
     /* States */
-    .state-msg { display: flex; align-items: center; justify-content: center; height: 220px; color: #484f58; font-size: 13px; gap: 10px; }
-    .spinner { width: 16px; height: 16px; border: 2px solid #21262d; border-top-color: #58a6ff; border-radius: 50%; animation: spin 0.7s linear infinite; }
+    .state-msg { display: flex; align-items: center; justify-content: center; height: 220px; color: #706048; font-size: 13px; gap: 10px; }
+    .spinner { width: 16px; height: 16px; border: 2px solid #3c2c18; border-top-color: #c8783a; border-radius: 50%; animation: spin 0.7s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
     /* Time window slider */
     .time-window {
-      margin-top: 16px;
-      background: #161b22;
-      border: 1px solid #21262d;
+      flex-shrink: 0;
+      margin-top: 8px;
+      margin-bottom: 14px;
+      background: #241c0e;
+      border: 1px solid #3c2c18;
       border-radius: 12px;
-      padding: 14px 18px 16px;
+      padding: 12px 18px 14px;
     }
     .tw-header {
       display: flex; align-items: center; justify-content: space-between;
-      font-size: 11px; color: #8b949e; margin-bottom: 8px;
+      font-size: 11px; color: #a08860; margin-bottom: 8px;
     }
-    .tw-header #window-value { font-variant-numeric: tabular-nums; color: #c9d1d9; }
+    .tw-header #window-value { font-variant-numeric: tabular-nums; color: #d4bc88; }
     #time-slider {
-      width: 100%; accent-color: #58a6ff; margin: 4px 0 10px;
+      width: 100%; accent-color: #c8783a; margin: 4px 0 10px;
     }
     .tw-presets { display: flex; gap: 6px; }
     .tw-presets button {
       flex: 1; font-size: 11px; padding: 4px 8px;
-      background: #21262d; color: #c9d1d9; border: 1px solid #30363d;
-      border-radius: 6px; cursor: pointer;
+      background: #362411; color: #d4bc88; border: 1px solid #3c2c18;
+      border-radius: 6px; cursor: pointer; font-family: inherit;
     }
-    .tw-presets button:hover { background: #30363d; }
+    .tw-presets button:hover { background: #422c14; }
   </style>
 </head>
 <body>
@@ -150,16 +169,25 @@
   <span id="refresh-label">Loading…</span>
 </header>
 
-<div class="charts">
-  <div class="card">
-    <div class="card-header"><h2>Temperature</h2><span class="badge badge-temp">°C</span></div>
-    <div class="legend" id="temp-legend"></div>
-    <div class="chart-wrap" id="temp-wrap"></div>
+<nav class="tab-nav">
+  <button class="tab-btn active" data-tab="temp">Temperature</button>
+  <button class="tab-btn" data-tab="humi">Humidity</button>
+</nav>
+
+<div class="tab-panels">
+  <div class="tab-panel active" id="tab-temp">
+    <div class="card">
+      <div class="card-header"><h2>Temperature</h2><span class="badge badge-temp">°C</span></div>
+      <div class="legend" id="temp-legend"></div>
+      <div class="chart-wrap" id="temp-wrap"></div>
+    </div>
   </div>
-  <div class="card">
-    <div class="card-header"><h2>Humidity</h2><span class="badge badge-humi">%</span></div>
-    <div class="legend" id="humi-legend"></div>
-    <div class="chart-wrap" id="humi-wrap"></div>
+  <div class="tab-panel" id="tab-humi">
+    <div class="card">
+      <div class="card-header"><h2>Humidity</h2><span class="badge badge-humi">%</span></div>
+      <div class="legend" id="humi-legend"></div>
+      <div class="chart-wrap" id="humi-wrap"></div>
+    </div>
   </div>
 </div>
 
@@ -182,15 +210,14 @@
 
 <script>
 const REFRESH_MS = 5 * 60 * 1000;
-const CHART_H    = 300;
 const M          = { top: 12, right: 20, bottom: 42, left: 46 };
 
 // 20 perceptually distinct colors optimised for dark backgrounds
 const PALETTE = [
-  '#4fc3f7','#81c784','#ffb74d','#f06292','#ce93d8',
-  '#80deea','#aed581','#ffd54f','#ff8a65','#90caf9',
-  '#26c6da','#66bb6a','#ffa726','#ec407a','#7e57c2',
-  '#29b6f6','#26a69a','#d4e157','#ff7043','#ab47bc',
+  '#e8854d','#d4a83c','#8ec464','#46b4a0','#9080c8',
+  '#d86a44','#b89844','#70b450','#38a898','#a070b4',
+  '#f09058','#c8b050','#94c05c','#42acb4','#b080bc',
+  '#cc7840','#a88830','#88a848','#50989e','#8060a4',
 ];
 
 // Stable color per device name (hash → palette index)
@@ -313,6 +340,7 @@ function drawChart(wrapId, metric, unit) {
   const wrap = document.getElementById(wrapId);
   wrap.innerHTML = '';
 
+  const CHART_H = Math.max(200, wrap.clientHeight || 300);
   const cutoff = getCutoff();
   const stuck = getStuckZeroDevices(metric);
   const metricData = allData.filter(d =>
@@ -391,7 +419,7 @@ function drawChart(wrapId, metric, unit) {
       .datum(sorted)
       .attr('class', 'sensor-line')
       .attr('stroke', col)
-      .attr('stroke-width', 2)
+      .attr('stroke-width', 4)
       .attr('opacity', isHidden ? 0 : 0.9)
       .attr('d', lineGen);
 
@@ -420,32 +448,32 @@ function drawChart(wrapId, metric, unit) {
     .attr('stroke-dasharray', '3 3')
     .style('opacity', 0);
 
-  // Use g as the event target so mousemove works even when pointer is over a line path
+  // Hover: show only the closest line's reading at the cursor position
   g.on('mousemove', function(event) {
-    const [mx] = d3.pointer(event, g);
+    const [mx, my] = d3.pointer(event, g);
     if (mx < 0 || mx > width) return;
     const ts = xScale.invert(mx);
     crosshair.attr('x1', mx).attr('x2', mx).style('opacity', 1);
 
-    let html = `<div class="tt-time">${fullFmt(ts)}</div>`;
-    let count = 0;
+    let closestName = null, closestVal = null, closestDist = Infinity;
     byDevice.forEach((rows, name) => {
       if (hidden.has(name)) return;
       const sorted = rows.sort((a, b) => a.ts - b.ts);
       const i = Math.min(bisect(sorted, ts), sorted.length - 1);
       const val = sorted[i]?.[metric];
       if (val == null) return;
-      count++;
-      html += `<div class="tt-row">
-        <span class="tt-dot" style="background:${deviceColor(name)}"></span>
-        <span class="tt-name">${name}</span>
-        <span class="tt-val" style="color:${deviceColor(name)}">${val.toFixed(1)}${unit}</span>
-      </div>`;
+      const dist = Math.abs(my - yScale(val));
+      if (dist < closestDist) { closestDist = dist; closestName = name; closestVal = val; }
     });
-    if (!count) return;
+    if (!closestName) return;
 
+    const col = deviceColor(closestName);
     const [px, py] = d3.pointer(event, document.body);
-    tooltip.html(html).style('opacity', 1)
+    tooltip.html(`<div class="tt-row">
+        <span class="tt-dot" style="background:${col}"></span>
+        <span class="tt-name">${closestName}</span>
+        <span class="tt-val" style="color:${col}">${closestVal.toFixed(1)}${unit}</span>
+      </div>`).style('opacity', 1)
       .style('left', `${Math.min(px + 14, window.innerWidth - 185)}px`)
       .style('top',  `${Math.max(8, py - 20)}px`);
   })
@@ -457,10 +485,14 @@ function drawChart(wrapId, metric, unit) {
 
 // ── Render all ────────────────────────────────────────────────────────────
 function render() {
-  buildLegend('temp-legend', 'temp-wrap', 'temperature', '°C');
-  buildLegend('humi-legend', 'humi-wrap', 'humidity',    '%');
-  drawChart('temp-wrap', 'temperature', '°C');
-  drawChart('humi-wrap', 'humidity',    '%');
+  const activeTab = document.querySelector('.tab-btn.active')?.dataset.tab || 'temp';
+  if (activeTab === 'temp') {
+    buildLegend('temp-legend', 'temp-wrap', 'temperature', '°C');
+    drawChart('temp-wrap', 'temperature', '°C');
+  } else {
+    buildLegend('humi-legend', 'humi-wrap', 'humidity', '%');
+    drawChart('humi-wrap', 'humidity', '%');
+  }
 }
 
 function setWindow(hours) {
@@ -520,6 +552,17 @@ const presets = document.querySelectorAll('.tw-presets button');
 slider.addEventListener('input', () => setWindow(parseInt(slider.value, 10)));
 presets.forEach(btn => {
   btn.addEventListener('click', () => setWindow(parseInt(btn.dataset.h, 10)));
+});
+
+// ── Tab switching ─────────────────────────────────────────────────────────
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
+    render();
+  });
 });
 </script>
 </body>
