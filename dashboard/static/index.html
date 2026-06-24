@@ -287,9 +287,10 @@ function drawChart(wrapId, metric, unit) {
 
   const visibleData = metricData.filter(d => !hidden.has(d.device_name));
   const yVals  = (visibleData.length ? visibleData : metricData).map(d => d[metric]);
+  const minVal = d3.min(yVals) ?? 0;
   const maxVal = d3.max(yVals) ?? 0;
   const yScale = d3.scaleLinear()
-    .domain([maxVal - 2, maxVal + 2])
+    .domain([minVal - 2, maxVal + 2])
     .range([height, 0]);
 
   // Grid (horizontal only)
