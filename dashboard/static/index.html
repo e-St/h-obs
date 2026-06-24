@@ -95,13 +95,37 @@
     .state-msg { display: flex; align-items: center; justify-content: center; height: 220px; color: #484f58; font-size: 13px; gap: 10px; }
     .spinner { width: 16px; height: 16px; border: 2px solid #21262d; border-top-color: #58a6ff; border-radius: 50%; animation: spin 0.7s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Time window slider */
+    .time-window {
+      margin-top: 16px;
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 12px;
+      padding: 14px 18px 16px;
+    }
+    .tw-header {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 11px; color: #8b949e; margin-bottom: 8px;
+    }
+    .tw-header #window-value { font-variant-numeric: tabular-nums; color: #c9d1d9; }
+    #time-slider {
+      width: 100%; accent-color: #58a6ff; margin: 4px 0 10px;
+    }
+    .tw-presets { display: flex; gap: 6px; }
+    .tw-presets button {
+      flex: 1; font-size: 11px; padding: 4px 8px;
+      background: #21262d; color: #c9d1d9; border: 1px solid #30363d;
+      border-radius: 6px; cursor: pointer;
+    }
+    .tw-presets button:hover { background: #30363d; }
   </style>
 </head>
 <body>
 
 <header>
   <h1>SwitchBot Monitor</h1>
-  <div class="live"><span class="live-dot"></span>Live · 24 h</div>
+  <div class="live"><span class="live-dot"></span>Live <span id="window-label">· 24 h</span></div>
   <span id="refresh-label">Loading…</span>
 </header>
 
@@ -115,6 +139,21 @@
     <div class="card-header"><h2>Humidity</h2><span class="badge badge-humi">%</span></div>
     <div class="legend" id="humi-legend"></div>
     <div class="chart-wrap" id="humi-wrap"></div>
+  </div>
+</div>
+
+<div class="time-window">
+  <div class="tw-header">
+    <span>Time window</span>
+    <span id="window-value">24 h</span>
+  </div>
+  <input type="range" id="time-slider" min="1" max="24" step="1" value="24" />
+  <div class="tw-presets">
+    <button data-h="1">1 h</button>
+    <button data-h="3">3 h</button>
+    <button data-h="6">6 h</button>
+    <button data-h="12">12 h</button>
+    <button data-h="24">24 h</button>
   </div>
 </div>
 
@@ -147,6 +186,7 @@ const fullFmt  = d3.timeFormat('%b %d  %H:%M');
 let allData  = [];
 let devices  = [];
 const hidden = new Set();   // persists across auto-refreshes
+let windowHours = 24;
 
 // ── Data ──────────────────────────────────────────────────────────────────
 async function fetchData() {
@@ -161,7 +201,13 @@ async function fetchData() {
 function buildLegend(legendId, wrapId, metric, unit) {
   const el = document.getElementById(legendId);
   el.innerHTML = '';
-  devices.forEach(name => {
+  const cutoff = getCutoff();
+  const stuck = getStuckZeroDevices(metric);
+  const visibleDevices = [...new Set(
+    allData.filter(d => d.ts >= cutoff && d[metric] != null && !stuck.has(d.device_name))
+           .map(d => d.device_name)
+  )].sort();
+  visibleDevices.forEach(name => {
     const item = document.createElement('span');
     item.className = 'legend-item ' + (hidden.has(name) ? 'hidden' : 'active');
     item.innerHTML =
@@ -175,14 +221,50 @@ function buildLegend(legendId, wrapId, metric, unit) {
   });
 }
 
+// ── Time window helpers ───────────────────────────────────────────────────
+function getCutoff() {
+  return new Date(Date.now() - windowHours * 3600 * 1000);
+}
+
+// Devices that have been reporting exactly 0 for a contiguous trailing period > 1 hour
+// (based on full data, independent of the current time-window view)
+function getStuckZeroDevices(metric) {
+  const ONE_HOUR_MS = 60 * 60 * 1000;
+  const stuck = new Set();
+
+  const relevant = allData.filter(d => d[metric] != null);
+  const byDevice = d3.group(relevant, d => d.device_name);
+
+  byDevice.forEach((rows, name) => {
+    const sorted = [...rows].sort((a, b) => a.ts - b.ts);
+    if (!sorted.length) return;
+    // measure trailing zeros duration from the most recent reading
+    let i = sorted.length - 1;
+    const lastTs = sorted[i].ts;
+    let firstZeroTs = lastTs;
+    while (i >= 0 && sorted[i][metric] === 0) {
+      firstZeroTs = sorted[i].ts;
+      i--;
+    }
+    if (lastTs - firstZeroTs > ONE_HOUR_MS) {
+      stuck.add(name);
+    }
+  });
+  return stuck;
+}
+
 // ── Chart ─────────────────────────────────────────────────────────────────
 function drawChart(wrapId, metric, unit) {
   const wrap = document.getElementById(wrapId);
   wrap.innerHTML = '';
 
-  const metricData = allData.filter(d => d[metric] != null);
+  const cutoff = getCutoff();
+  const stuck = getStuckZeroDevices(metric);
+  const metricData = allData.filter(d =>
+    d[metric] != null && d.ts >= cutoff && !stuck.has(d.device_name)
+  );
   if (!metricData.length) {
-    wrap.innerHTML = `<div class="state-msg">No ${metric} data yet — waiting for first readings</div>`;
+    wrap.innerHTML = `<div class="state-msg">No ${metric} data in last ${windowHours} h</div>`;
     return;
   }
 
@@ -197,18 +279,18 @@ function drawChart(wrapId, metric, unit) {
   svg.append('defs').append('clipPath').attr('id', `clip-${wrapId}`)
     .append('rect').attr('width', width).attr('height', height + 2).attr('y', -1);
 
-  // Scales from ALL data so axis stays stable when toggling sensors
+  // X domain is the selected time window (stable)
+  const now = new Date();
   const xScale = d3.scaleTime()
-    .domain(d3.extent(metricData, d => d.ts))
+    .domain([cutoff, now])
     .range([0, width]);
 
   const visibleData = metricData.filter(d => !hidden.has(d.device_name));
   const yVals  = (visibleData.length ? visibleData : metricData).map(d => d[metric]);
-  const [yMin, yMax] = d3.extent(yVals);
-  const yPad   = (yMax - yMin) * 0.14 || 1;
+  const maxVal = d3.max(yVals) ?? 0;
   const yScale = d3.scaleLinear()
-    .domain([yMin - yPad, yMax + yPad])
-    .range([height, 0]).nice();
+    .domain([maxVal - 2, maxVal + 2])
+    .range([height, 0]);
 
   // Grid (horizontal only)
   g.append('g').attr('class', 'grid')
@@ -305,6 +387,14 @@ function render() {
   drawChart('humi-wrap', 'humidity',    '%');
 }
 
+function setWindow(hours) {
+  windowHours = Math.max(1, Math.min(24, hours));
+  document.getElementById('time-slider').value = windowHours;
+  document.getElementById('window-value').textContent = `${windowHours} h`;
+  document.getElementById('window-label').textContent = `· ${windowHours} h`;
+  render();
+}
+
 function showLoading() {
   ['temp-wrap', 'humi-wrap'].forEach(id => {
     document.getElementById(id).innerHTML =
@@ -346,6 +436,15 @@ showLoading();
 refresh();
 setInterval(refresh, REFRESH_MS);
 window.addEventListener('resize', () => { if (allData.length) render(); });
+
+// ── Time window slider & presets ──────────────────────────────────────────
+const slider = document.getElementById('time-slider');
+const presets = document.querySelectorAll('.tw-presets button');
+
+slider.addEventListener('input', () => setWindow(parseInt(slider.value, 10)));
+presets.forEach(btn => {
+  btn.addEventListener('click', () => setWindow(parseInt(btn.dataset.h, 10)));
+});
 </script>
 </body>
 </html>
