@@ -62,6 +62,27 @@
     .legend-item.hidden { opacity: 0.28; }
     .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 
+    /* Legend actions (Show all / Deselect all) */
+    .legend-controls {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-right: 10px;
+      font-size: 10px;
+      flex-shrink: 0;
+    }
+    .legend-action {
+      color: #58a6ff;
+      cursor: pointer;
+      padding: 1px 5px;
+      border-radius: 3px;
+      user-select: none;
+    }
+    .legend-action:hover {
+      background: rgba(88, 166, 255, 0.12);
+      color: #79b8ff;
+    }
+
     /* SVG */
     .chart-wrap { position: relative; }
     .axis text { fill: #484f58; font-size: 11px; }
@@ -69,7 +90,7 @@
     .axis line { stroke: #21262d; }
     .grid line { stroke: #1c2128; stroke-width: 1; }
     .grid path { display: none; }
-    .sensor-line { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .sensor-line { fill: none; stroke-linecap: round; stroke-linejoin: round; cursor: pointer; }
     .crosshair-line { pointer-events: none; }
 
     /* Tooltip */
@@ -207,15 +228,49 @@ function buildLegend(legendId, wrapId, metric, unit) {
     allData.filter(d => d.ts >= cutoff && d[metric] != null && !stuck.has(d.device_name))
            .map(d => d.device_name)
   )].sort();
+
+  // Legend actions: Deselect all, Show all
+  if (visibleDevices.length > 0) {
+    const controls = document.createElement('span');
+    controls.className = 'legend-controls';
+
+    const showAll = document.createElement('span');
+    showAll.className = 'legend-action';
+    showAll.textContent = 'Show all';
+    showAll.addEventListener('click', () => {
+      visibleDevices.forEach(n => hidden.delete(n));
+      render();
+    });
+
+    const hideAll = document.createElement('span');
+    hideAll.className = 'legend-action';
+    hideAll.textContent = 'Deselect all';
+    hideAll.addEventListener('click', () => {
+      visibleDevices.forEach(n => hidden.add(n));
+      render();
+    });
+
+    controls.appendChild(showAll);
+    controls.appendChild(hideAll);
+    el.appendChild(controls);
+  }
+
   visibleDevices.forEach(name => {
     const item = document.createElement('span');
     item.className = 'legend-item ' + (hidden.has(name) ? 'hidden' : 'active');
     item.innerHTML =
       `<span class="legend-dot" style="background:${deviceColor(name)}"></span>${name}`;
-    item.addEventListener('click', () => {
-      hidden.has(name) ? hidden.delete(name) : hidden.add(name);
-      buildLegend(legendId, wrapId, metric, unit);
-      drawChart(wrapId, metric, unit);
+    item.addEventListener('click', (ev) => {
+      const isMulti = ev.shiftKey || ev.ctrlKey || ev.metaKey;
+      if (isMulti) {
+        // Modifier click: toggle just this entry (supports multi-select)
+        hidden.has(name) ? hidden.delete(name) : hidden.add(name);
+      } else {
+        // Plain click on legend entry: select ONLY this line (isolate)
+        visibleDevices.forEach(n => hidden.add(n));
+        hidden.delete(name);
+      }
+      render();
     });
     el.appendChild(item);
   });
@@ -286,9 +341,17 @@ function drawChart(wrapId, metric, unit) {
     .range([0, width]);
 
   const visibleData = metricData.filter(d => !hidden.has(d.device_name));
-  const yVals  = (visibleData.length ? visibleData : metricData).map(d => d[metric]);
-  const minVal = d3.min(yVals) ?? 0;
-  const maxVal = d3.max(yVals) ?? 0;
+  if (!visibleData.length) {
+    wrap.innerHTML = `<div class="state-msg">All series deselected</div>`;
+    return;
+  }
+
+  // Y domain: visible, non-stuck, in-window readings — zeros excluded so that a device
+  // that recently recovered from a stuck-zero phase does not pull the axis down.
+  const yVals = visibleData.map(d => d[metric]).filter(v => v !== 0);
+  const _fallback = visibleData.map(d => d[metric]);
+  const minVal = d3.min(yVals.length ? yVals : _fallback) ?? 0;
+  const maxVal = d3.max(yVals.length ? yVals : _fallback) ?? 0;
   const yScale = d3.scaleLinear()
     .domain([minVal - 2, maxVal + 2])
     .range([height, 0]);
@@ -306,13 +369,18 @@ function drawChart(wrapId, metric, unit) {
   g.append('g').attr('class', 'axis')
     .call(d3.axisLeft(yScale).ticks(5).tickSize(3));
 
-  // Lines
+  // Hover rect (background layer) appended first so lines (next) sit on top for clicks
+  const hoverRect = g.append('rect')
+    .attr('width', width).attr('height', height).attr('fill', 'transparent');
+
+  // Lines (drawn above hoverRect so they can receive click events)
   const lineGen = d3.line()
     .x(d => xScale(d.ts)).y(d => yScale(d[metric]))
     .curve(d3.curveMonotoneX);
 
   const byDevice = d3.group(metricData, d => d.device_name);
   const lineGroup = g.append('g').attr('clip-path', `url(#clip-${wrapId})`);
+  const displayableDevices = [...byDevice.keys()];
 
   byDevice.forEach((rows, name) => {
     const sorted = rows.sort((a, b) => a.ts - b.ts);
@@ -327,6 +395,14 @@ function drawChart(wrapId, metric, unit) {
       .attr('opacity', isHidden ? 0 : 0.9)
       .attr('d', lineGen);
 
+    // Click a line (after hovering it) to isolate: show only this device
+    path.on('click', () => {
+      if (hidden.has(name)) return;
+      displayableDevices.forEach(n => hidden.add(n));
+      hidden.delete(name);
+      render();
+    });
+
     if (!isHidden) {
       const len = path.node().getTotalLength();
       path.attr('stroke-dasharray', `${len} ${len}`)
@@ -336,7 +412,7 @@ function drawChart(wrapId, metric, unit) {
     }
   });
 
-  // ── Hover ────────────────────────────────────────────────────────────────
+  // ── Hover (attached to g so it fires over rect or over lines) ────────────
   const bisect    = d3.bisector(d => d.ts).left;
   const crosshair = g.append('line').attr('class', 'crosshair-line')
     .attr('y1', 0).attr('y2', height)
@@ -344,40 +420,39 @@ function drawChart(wrapId, metric, unit) {
     .attr('stroke-dasharray', '3 3')
     .style('opacity', 0);
 
-  g.append('rect')                         // invisible hit area
-    .attr('width', width).attr('height', height).attr('fill', 'transparent')
-    .on('mousemove', function(event) {
-      const [mx] = d3.pointer(event);
-      if (mx < 0 || mx > width) return;
-      const ts = xScale.invert(mx);
-      crosshair.attr('x1', mx).attr('x2', mx).style('opacity', 1);
+  // Use g as the event target so mousemove works even when pointer is over a line path
+  g.on('mousemove', function(event) {
+    const [mx] = d3.pointer(event, g);
+    if (mx < 0 || mx > width) return;
+    const ts = xScale.invert(mx);
+    crosshair.attr('x1', mx).attr('x2', mx).style('opacity', 1);
 
-      let html = `<div class="tt-time">${fullFmt(ts)}</div>`;
-      let count = 0;
-      byDevice.forEach((rows, name) => {
-        if (hidden.has(name)) return;
-        const sorted = rows.sort((a, b) => a.ts - b.ts);
-        const i = Math.min(bisect(sorted, ts), sorted.length - 1);
-        const val = sorted[i]?.[metric];
-        if (val == null) return;
-        count++;
-        html += `<div class="tt-row">
-          <span class="tt-dot" style="background:${deviceColor(name)}"></span>
-          <span class="tt-name">${name}</span>
-          <span class="tt-val" style="color:${deviceColor(name)}">${val.toFixed(1)}${unit}</span>
-        </div>`;
-      });
-      if (!count) return;
-
-      const [px, py] = d3.pointer(event, document.body);
-      tooltip.html(html).style('opacity', 1)
-        .style('left', `${Math.min(px + 14, window.innerWidth - 185)}px`)
-        .style('top',  `${Math.max(8, py - 20)}px`);
-    })
-    .on('mouseleave', () => {
-      crosshair.style('opacity', 0);
-      tooltip.style('opacity', 0);
+    let html = `<div class="tt-time">${fullFmt(ts)}</div>`;
+    let count = 0;
+    byDevice.forEach((rows, name) => {
+      if (hidden.has(name)) return;
+      const sorted = rows.sort((a, b) => a.ts - b.ts);
+      const i = Math.min(bisect(sorted, ts), sorted.length - 1);
+      const val = sorted[i]?.[metric];
+      if (val == null) return;
+      count++;
+      html += `<div class="tt-row">
+        <span class="tt-dot" style="background:${deviceColor(name)}"></span>
+        <span class="tt-name">${name}</span>
+        <span class="tt-val" style="color:${deviceColor(name)}">${val.toFixed(1)}${unit}</span>
+      </div>`;
     });
+    if (!count) return;
+
+    const [px, py] = d3.pointer(event, document.body);
+    tooltip.html(html).style('opacity', 1)
+      .style('left', `${Math.min(px + 14, window.innerWidth - 185)}px`)
+      .style('top',  `${Math.max(8, py - 20)}px`);
+  })
+  .on('mouseleave', () => {
+    crosshair.style('opacity', 0);
+    tooltip.style('opacity', 0);
+  });
 }
 
 // ── Render all ────────────────────────────────────────────────────────────
